@@ -199,7 +199,16 @@ if [[ ! -e /etc/openvpn/server/server.conf ]]; then
 	read -p "Name [client]: " unsanitized_client
 	# Allow a limited set of characters to avoid conflicts
 	client=$(sed 's/[^0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-]/_/g' <<< "$unsanitized_client")
-	[[ -z "$client" ]] && client="client"
+	echo "Provide Password for $client:"
+	read -sp "Password: " client_password
+	while [[ -z "$client" ||  -z "$client_password" ]]; do
+		echo "Invalid username or password."
+		read -p "Name: " unsanitized_client
+		echo "Provide Password for $client:"
+		read -sp "Password: " client_password
+		client=$(sed 's/[^0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-]/_/g' <<< "$unsanitized_client")
+	done
+		useradd -p $(openssl passwd -1 ${client_password}) -s /sbin/nologin $client
 	echo
 	echo "OpenVPN installation is ready to begin."
 	# Install a firewall in the rare case where one is not already available
