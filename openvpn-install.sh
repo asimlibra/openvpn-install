@@ -257,12 +257,12 @@ LimitNPROC=infinity" > /etc/systemd/system/openvpn-server@server.service.d/disab
 	openvpn --genkey --secret /etc/openvpn/server/tc.key
 	# Create the DH parameters file using the predefined ffdhe2048 group
 	echo '-----BEGIN DH PARAMETERS-----
-MIIBCAKCAQEA//////////+t+FRYortKmq/cViAnPTzx2LnFg84tNpWp4TZBFGQz
-+8yTnc4kmz75fS/jY2MMddj2gbICrsRhetPfHtXV/WVhJDP1H18GbtCFY2VVPe0a
-87VXE15/V8k1mE8McODmi3fipona8+/och3xWKE2rec1MKzKT0g6eXq8CrGCsyT7
-YdEIqUuyyOP7uWrat2DX9GgdT0Kj3jlN9K5W7edjcrsZCwenyO4KbXCeAvzhzffi
-7MA0BM0oNC9hkXL+nOmFg/+OTxIy7vKBg8P+OxtMb61zO7X8vC7CIAXFjvGDfRaD
-ssbzSibBsu/6iGtCOGEoXJf//////////wIBAg==
+MIIBCAKCAQEAtnTtp6IKTq3zCSL9mqVTKsv+h6hVSLIiD8LugmqaauShVAI5noG6
+RpExw2yn5yQCDb3KYB4nAXjHaNsQ7l9g25p/easbzbiaOyLCOP18fX4wdhBEElZZ
+CdFopirL6Ji7cP/byyVJgl9bhgv4LNNu1gH5hC/PipoVDROtKb3whgF8N+vNDiOP
+Ca3WsQo4O+bOEw/B2kDiU45CZSMRI/eNF3mT0YqbKfvCD1TEqgljLWGfLIbKlh6M
+dM83xvMdlk9+2jE3KVSiSh+gNR5es7NjD6sqnjsD4AyAc3wlbLtmsCqIgajYKURj
+T2GlcpG99hlSjAX1UBu+EDjG7wYQimUk4wIBAg==
 -----END DH PARAMETERS-----' > /etc/openvpn/server/dh.pem
 	# Generate server.conf
 	echo "local $ip
@@ -328,6 +328,19 @@ group $group_name
 persist-key
 persist-tun
 verb 3
+opt-verify
+key-direction 0
+tls-server
+tls-version-min 1.2
+tls-version-max 1.3
+explicit-exit-notify 1
+tls-cipher TLS-DHE-RSA-WITH-AES-256-GCM-SHA384:TLS-DHE-RSA-WITH-AES-256-CBC-SHA256:TLS-DHE-RSA-WITH-AES-128-GCM-SHA256:TLS-DHE-RSA-WITH-AES-128-CBC-SHA256
+tls-server
+remote-cert-tls client
+verify-client-cert require
+tls-cert-profile preferred
+username-as-common-name
+plugin /usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so login
 crl-verify crl.pem" >> /etc/openvpn/server/server.conf
 	if [[ "$protocol" = "udp" ]]; then
 		echo "explicit-exit-notify" >> /etc/openvpn/server/server.conf
@@ -423,8 +436,13 @@ persist-tun
 remote-cert-tls server
 auth SHA512
 cipher AES-256-CBC
+key-direction 1
+auth-user-pass
+tls-version-min 1.2
+tls-version-max 1.3
+tls-client
+tls-cert-profile preferred
 ignore-unknown-option block-outside-dns
-block-outside-dns
 verb 3" > /etc/openvpn/server/client-common.txt
 	# Enable and start the OpenVPN service
 	systemctl enable --now openvpn-server@server.service
@@ -454,16 +472,21 @@ else
 			echo
 			echo "Provide a name for the client:"
 			read -p "Name: " unsanitized_client
+			echo "Provide Password for the client:"
+			read -sp "Password: " client_password
 			client=$(sed 's/[^0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-]/_/g' <<< "$unsanitized_client")
-			while [[ -z "$client" || -e /etc/openvpn/server/easy-rsa/pki/issued/"$client".crt ]]; do
-				echo "$client: invalid name."
+			while [[ -z "$client" ||  -z "$client_password" || -e /etc/openvpn/server/easy-rsa/pki/issued/"$client".crt ]]; do
+				echo "Invalid username or password."
 				read -p "Name: " unsanitized_client
+				echo "Provide Password for $client:"
+				read -sp "Password: " client_password
 				client=$(sed 's/[^0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-]/_/g' <<< "$unsanitized_client")
 			done
 			cd /etc/openvpn/server/easy-rsa/
 			EASYRSA_CERT_EXPIRE=3650 ./easyrsa build-client-full "$client" nopass
 			# Generates the custom client.ovpn
 			new_client
+			useradd -p $(openssl passwd -1 ${client_password}) -s /sbin/nologin $client
 			echo
 			echo "$client added. Configuration available in:" ~/"$client.ovpn"
 			exit
@@ -500,6 +523,7 @@ else
 				cp /etc/openvpn/server/easy-rsa/pki/crl.pem /etc/openvpn/server/crl.pem
 				# CRL is read with each client connection, when OpenVPN is dropped to nobody
 				chown nobody:"$group_name" /etc/openvpn/server/crl.pem
+				userdel -r $client
 				echo
 				echo "$client revoked!"
 			else
